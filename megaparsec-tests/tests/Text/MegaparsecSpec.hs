@@ -27,6 +27,7 @@ import qualified Control.Monad.Writer.Lazy as L
 import qualified Control.Monad.Writer.Strict as S
 import qualified Data.ByteString as BS
 import Data.Char (isLetter, toUpper)
+import Data.Either (isRight)
 import Data.Foldable (asum)
 import Data.List (isPrefixOf)
 import qualified Data.List as DL
@@ -39,6 +40,8 @@ import Data.Void
 import Test.Hspec
 import Test.Hspec.Megaparsec
 import Test.Hspec.Megaparsec.AdHoc
+import Test.Hspec.Megaparsec.Grammar (Grammar)
+import qualified Test.Hspec.Megaparsec.Grammar as Grammar
 import Test.QuickCheck hiding (label)
 import Text.Megaparsec
 import Text.Megaparsec.Char
@@ -1794,6 +1797,21 @@ spec = do
                     )
                     (Internal.OK mempty (T.unpack pre))
         prs (breakOn "x") "abxcd" `shouldParse` "ab"
+
+    describe "grammar" $ do
+      it "fully consumes the generated input" $
+        property $ \(g :: Grammar Char) ->
+          forAll
+            (Grammar.toInputGen g)
+            (isRight . parse (Grammar.toParsec g <* eof) "")
+      it "parses only the generated input and leaves any suffix" $
+        property $ \g s ->
+          forAll
+            (Grammar.toInputGen g)
+            $ \s0 ->
+              let s' = s0 ++ s
+                  p = Grammar.toParsec g
+               in prs' p s' `succeedsLeaving` s
 
 ----------------------------------------------------------------------------
 -- Helpers
