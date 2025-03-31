@@ -193,9 +193,9 @@ spec = do
                 forAll (Grammar.toInputGen g1) $ \s1 ->
                   let p0 = Grammar.toParsec g0
                       p1 = Grammar.toParsec g1
-                   in p0 `failsOnFirstToken` s1 ==> do
-                        let s' = s1 ++ s
-                            p = p0 <|> p1
+                      s' = s1 ++ s
+                      p = p0 <|> p1
+                   in p0 `failsOnFirstToken` s' ==> do
                         prs p s' `shouldParse` s1
                         prs' p s' `succeedsLeaving` s
         context "when stream does not begin with either string" $
@@ -243,8 +243,8 @@ spec = do
                       p1 = Grammar.toParsec g1
                       p = p0 <|> (p1 *> p0)
                       s = s1 ++ cs
-                   in p0 `failsOnFirstToken` s1
-                        && p0 `failsOnFirstToken` cs
+                   in p0 `failsOnFirstToken` cs
+                        && p0 `failsOnFirstToken` s
                         ==> prs' p s `failsLeaving` cs
         context "when stream begins with not matching character" $
           it "signals correct parse error" $
