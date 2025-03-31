@@ -29,7 +29,7 @@ import qualified Data.ByteString as BS
 import Data.Char (isLetter, toUpper)
 import Data.Either (isRight)
 import Data.Foldable (asum)
-import Data.List (isPrefixOf)
+import Data.List (concat, isPrefixOf)
 import qualified Data.List as DL
 import qualified Data.List.NonEmpty as NE
 import Data.Semigroup
@@ -151,14 +151,19 @@ spec = do
            in prs (u <* v) "" === prs (pure const <*> u <*> v) ""
 
   describe "ParsecT Alternative instance" $ do
-    describe "empty" $
+    describe "empty" $ do
       it "always fails" $
         property $ \n ->
           prs (empty <|> pure n) "" `shouldParse` (n :: Integer)
+      context "generic parser" $
+        it "always fails" $
+          property $ \g ->
+            forAll (Grammar.toInputGen g) $ \i ->
+              prs (empty <|> Grammar.toParsec g) i `shouldParse` i
 
     describe "(<|>)" $ do
       context "with two strings" $ do
-        context "stream begins with the first string" $
+        context "stream begins with the first string" $ do
           it "parses the string" $
             property $ \s0 s1 s ->
               not (s1 `isPrefixOf` s0) ==> do
@@ -166,7 +171,15 @@ spec = do
                     p = chunk s0 <|> chunk s1
                 prs p s' `shouldParse` s0
                 prs' p s' `succeedsLeaving` s
-        context "stream begins with the second string" $
+          context "generic parsers" $
+            it "parses the string" $
+              property $ \g0 g1 s ->
+                forAll (Grammar.toInputGen g0) $ \s0 -> do
+                  let s' = s0 ++ s
+                      p = Grammar.toParsec g0 <|> Grammar.toParsec g1
+                  prs p s' `shouldParse` s0
+                  prs' p s' `succeedsLeaving` s
+        context "stream begins with the second string" $ do
           it "parses the string" $
             property $ \s0 s1 s ->
               not (s0 `isPrefixOf` s1) && not (s0 `isPrefixOf` s) ==> do
@@ -174,6 +187,17 @@ spec = do
                     p = string s0 <|> string s1
                 prs p s' `shouldParse` s1
                 prs' p s' `succeedsLeaving` s
+          context "generic parsers" $
+            it "parses it" $
+              property $ \g0 g1 s ->
+                forAll (Grammar.toInputGen g1) $ \s1 ->
+                  let p0 = Grammar.toParsec g0
+                      p1 = Grammar.toParsec g1
+                   in p0 `failsOnFirstToken` s1 ==> do
+                        let s' = s1 ++ s
+                            p = p0 <|> p1
+                        prs p s' `shouldParse` s1
+                        prs' p s' `succeedsLeaving` s
         context "when stream does not begin with either string" $
           it "signals correct error message" $
             property $ \s0 s1 s ->
@@ -188,7 +212,7 @@ spec = do
                         <> (if null s then ueof else utoks z)
                     )
       context "with two complex parsers" $ do
-        context "when stream begins with matching character" $
+        context "when stream begins with matching character" $ do
           it "parses it" $
             property $ \a b ->
               a /= b ==> do
@@ -196,7 +220,14 @@ spec = do
                     s = [a]
                 prs p s `shouldParse` a
                 prs' p s `succeedsLeaving` ""
-        context "when stream begins with only one matching character" $
+          context "generic parsers" $
+            it "parses it" $
+              property $ \g0 g1 ->
+                forAll (Grammar.toInputGen g0) $ \s0 -> do
+                  let p = Grammar.toParsec g0 <|> Grammar.toParsec g1
+                  prs p s0 `shouldParse` s0
+                  prs' p s0 `succeedsLeaving` ""
+        context "when stream begins with only one matching character" $ do
           it "signals correct parse error" $
             property $ \a b c ->
               a /= b && a /= c ==> do
@@ -204,6 +235,17 @@ spec = do
                     s = [b, c]
                 prs p s `shouldFailWith` err 1 (utok c <> etok a)
                 prs' p s `failsLeaving` [c]
+          context "generic parsers" $
+            it "fails leaving the rest" $
+              property $ \g0 g1 cs ->
+                forAll (Grammar.toInputGen g1) $ \s1 ->
+                  let p0 = Grammar.toParsec g0
+                      p1 = Grammar.toParsec g1
+                      p = p0 <|> (p1 *> p0)
+                      s = s1 ++ cs
+                   in p0 `failsOnFirstToken` s1
+                        && p0 `failsOnFirstToken` cs
+                        ==> prs' p s `failsLeaving` cs
         context "when stream begins with not matching character" $
           it "signals correct parse error" $
             property $ \a b c ->
@@ -225,25 +267,48 @@ spec = do
         prs p s `shouldBe` prs p' s
 
     describe "many" $ do
-      context "when stream begins with things argument of many parses" $
+      context "when stream begins with things argument of many parses" $ do
         it "they are parsed" $
           property $ \(NonNegative a) (NonNegative b) (NonNegative c) -> do
             let p = many (char 'a')
                 s = abcRow a b c
             prs p s `shouldParse` replicate a 'a'
             prs' p s `succeedsLeaving` drop a s
-      context "when stream does not begin with thing argument of many parses" $
+        context "generic parsers" $
+          it "they are parsed" $
+            property $ \(NonNegative a) g0 s1 ->
+              let p0 = Grammar.toParsec g0
+               in p0 `failsOnFirstToken` s1 ==>
+                    forAll (Grammar.toInputGen g0) $ \s0 -> do
+                      let p = many p0
+                          s = concat (replicate a s0) ++ s1
+                      prs p s `shouldParse` replicate a s0
+                      prs' p s `succeedsLeaving` s1
+      context "when stream does not begin with thing argument of many parses" $ do
         it "does nothing" $
           property $ \(NonNegative a) (NonNegative b) (NonNegative c) -> do
             let p = many (char 'd')
                 s = abcRow a b c
             prs p s `shouldParse` ""
             prs' p s `succeedsLeaving` s
-      context "when stream is empty" $
+        context "generic parsers" $
+          it "does nothing" $
+            property $ \g0 s ->
+              let p0 = Grammar.toParsec g0
+               in p0 `failsOnFirstToken` s ==> do
+                    let p = many p0
+                    prs p s `shouldParse` []
+                    prs' p s `succeedsLeaving` s
+      context "when stream is empty" $ do
         it "succeeds parsing nothing" $
           do
             let p = many (char 'a')
             prs p "" `shouldParse` ""
+        context "generic parsers" $
+          it "succeeds parsing nothing" $
+            property $ \g0 ->
+              let p = many (Grammar.toParsec g0)
+               in prs p "" `shouldParse` []
       context "when there are two many combinators in a row that parse nothing" $
         it "accumulated hints are reflected in parse error" $
           do
@@ -283,14 +348,23 @@ spec = do
             let p = some (char ch)
             prs p "" `shouldFailWith` err 0 (ueof <> etok ch)
     context "optional" $ do
-      context "when stream begins with that optional thing" $
+      context "when stream begins with that optional thing" $ do
         it "parses it" $
           property $ \a b -> do
             let p = optional (char a) <* char b
                 s = [a, b]
             prs p s `shouldParse` Just a
             prs' p s `succeedsLeaving` ""
-      context "when stream does not begin with that optional thing" $
+        context "generic parsers" $
+          it "parses it" $
+            property $ \g0 g1 ->
+              forAll (Grammar.toInputGen g0) $ \s0 ->
+                forAll (Grammar.toInputGen g1) $ \s1 -> do
+                  let p = optional (Grammar.toParsec g0) <* Grammar.toParsec g1
+                      s = s0 ++ s1
+                  prs p s `shouldParse` Just s0
+                  prs' p s `succeedsLeaving` ""
+      context "when stream does not begin with that optional thing" $ do
         it "succeeds parsing nothing" $
           property $ \a b ->
             a /= b ==> do
@@ -298,11 +372,27 @@ spec = do
                   s = [b]
               prs p s `shouldParse` Nothing
               prs' p s `succeedsLeaving` ""
-      context "when stream is empty" $
+        context "generic parsers" $
+          it "succeeds parsing nothing" $
+            property $ \g0 g1 ->
+              forAll (Grammar.toInputGen g1) $ \s1 ->
+                let p0 = Grammar.toParsec g0
+                    p1 = Grammar.toParsec g1
+                    p = optional p0 <* p1
+                    s = s1
+                 in p0 `failsOnFirstToken` s1 ==> do
+                      prs p s `shouldParse` Nothing
+                      prs' p s `succeedsLeaving` ""
+      context "when stream is empty" $ do
         it "succeeds parsing nothing" $
           property $ \a -> do
             let p = optional (char a)
             prs p "" `shouldParse` Nothing
+        context "generic parsers" $
+          it "succeeds parsing nothing" $
+            property $ \g ->
+              let p = optional (Grammar.toParsec g)
+               in prs p "" `shouldParse` Nothing
 
   describe "ParsecT Monad instance" $ do
     it "satisfies left identity law" $
