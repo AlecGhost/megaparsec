@@ -25,6 +25,7 @@ module Test.Hspec.Megaparsec.AdHoc
     prs_,
     grs,
     grs',
+    failsOnFirstToken,
 
     -- * Other
     nes,
@@ -173,6 +174,10 @@ evalRWSTS :: (Monad m) => S.RWST () [Int] () m a -> m a
 evalRWSTS m = do
   (a, _, _) <- S.runRWST m () ()
   return a
+
+-- Check if the parser fails on the first token of the input string.
+failsOnFirstToken :: Parser a -> String -> Bool
+failsOnFirstToken p = (== 0) . stateOffset . fst . prs' p
 
 ----------------------------------------------------------------------------
 -- Other
